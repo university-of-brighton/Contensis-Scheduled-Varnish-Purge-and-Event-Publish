@@ -1,0 +1,190 @@
+@using Contensis.Framework.Web
+@using Contensis.Framework.Web.Search
+@using Zengenti.Contensis.Delivery
+@using Zengenti.Data
+@using Zengenti.Search
+@using Zengenti.Contensis.Management
+@using Zengenti.Contensis.Management.Workflow.Basic
+@using Newtonsoft.Json
+@using System.Collections.Generic
+@using System
+@using System.Net
+@functions{
+    // Replace with your Taxonomy keys
+    public static class TypeKeys
+    {
+        public const string PURGE_PAGE = "0/1332/1333";
+        public const string PURGE_FOLDER = "0/1332/1334";
+        public const string PURGE_FOLDER_INC = "0/1332/1336";
+        public const string PUBLISH_ENTRY = "0/1332/1335";
+    }
+}
+@{
+    // Replace with your settings
+    var accessKey = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+    var varnishAddress = @"http://X.X.X.X"; // Address of Varnish server
+    var liveServerHost = "live.hostname.com" // Real hostname of the live site
+    var rootUrl = @"https://yourcms.com";
+    var clientId = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    var sharedSecret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    var projectId = "yourproject";
+    
+    Response.ContentType = "application/json";
+    var requestWhen = Request.QueryString.Get("when");
+    var requestKey = Request.QueryString.Get("key");
+
+    var results = new List<ScheduledEventResult>();
+
+    if(requestKey == accessKey)
+    {
+        DateTime performWhen = DateTime.Parse(requestWhen);
+        IEnumerable<ScheduledEvent> scheduledEvents = GetScheduledEventsForTime(performWhen);
+        var purger = new VarnishPurger(varnishAddress, liveServerHost);
+        var publisher = new EntryPublisher(rootUrl, clientId, sharedSecret, projectId);
+        
+        // Perform publishes first in case there is a corresponding purge
+        var publishEvents = scheduledEvents.Where(e => e.EventType.Key == TypeKeys.PUBLISH_ENTRY);
+        foreach(ScheduledEvent publishEvent in publishEvents)
+        {
+            results.AddRange(publisher.PublishEntries(publishEvent.Parameters));
+        }
+        
+        foreach(ScheduledEvent scheduledEvent in scheduledEvents)
+        {
+            switch(scheduledEvent.EventType.Key)
+            {
+                case TypeKeys.PURGE_PAGE:
+                    results.AddRange(purger.PurgePages(scheduledEvent.Parameters));
+                    break;
+                case TypeKeys.PURGE_FOLDER:
+                    results.AddRange(purger.PurgeFolders(scheduledEvent.Parameters));
+                    break;
+                case TypeKeys.PURGE_FOLDER_INC:
+                    results.AddRange(purger.PurgeFolders(scheduledEvent.Parameters, true));
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+}
+@Html.Raw(JsonConvert.SerializeObject(results))
+@functions{
+    public class ScheduledEvent
+    {
+        public string Title { get; set; }
+        public DateTime When { get; set; }
+        public Zengenti.Contensis.Delivery.TaxonomyNode EventType { get; set; }
+        public string[] Parameters { get; set; }
+    }
+
+    public IEnumerable<ScheduledEvent> GetScheduledEventsForTime(DateTime performWhen)
+    {
+        var client = ContensisClient.Create();
+        var query = new Zengenti.Search.Query(
+            Op.EqualTo("sys.contentTypeId", "scheduledEvent"),
+            Op.EqualTo("when", performWhen)
+        );
+        return client.Entries.Search<ScheduledEvent>(query).Items;
+    }
+
+    public class VarnishPurger
+    {
+        private string VarnishAddress;
+        private string LiveServerHost;
+
+        public VarnishPurger(string varnishAddress, string liveServerHost)
+        {
+            VarnishAddress = varnishAddress;
+            LiveServerHost = liveServerHost;
+        }
+
+        public IEnumerable<ScheduledEventResult> PurgePages(IEnumerable<string> pages)
+        {
+            foreach (var page in pages)
+            {
+                yield return PurgePage(page);
+            }
+        }
+
+        public IEnumerable<ScheduledEventResult> PurgeFolders(IEnumerable<string> paths, bool includeSubfolders = false)
+        {
+
+            foreach (var path in paths)
+            {
+                foreach(ScheduledEventResult result in PurgeFolder(path, includeSubfolders))
+                {
+                    yield return result;
+                }
+            }
+        }
+
+        public ScheduledEventResult PurgePage(string path)
+        {
+            var purgeRequest = (HttpWebRequest)WebRequest.Create(VarnishAddress + path);
+            purgeRequest.Accept = "*/*";
+            purgeRequest.Method = "PURGE";
+            purgeRequest.Host = LiveServerHost;
+            HttpWebResponse response = (HttpWebResponse) purgeRequest.GetResponse();
+            return new ScheduledEventResult { Action = "Purge page", Subject = path, Status = response.StatusCode.ToString() };
+        }
+
+        public IEnumerable<ScheduledEventResult> PurgeFolder(string path, bool includeSubfolders = false)
+        {
+            IQuery query = (includeSubfolders) ?
+                Contensis.Framework.Web.Search.Query.Where("Property_Path").StartsWith(path).And("Property_TypeId").IsEqualTo("0") :
+                Contensis.Framework.Web.Search.Query.Where("Property_Path").IsEqualTo(path).And("Property_TypeId").IsEqualTo("0");
+            var nodeFinder = new NodeFinder();
+            IReadOnlyCollection<ContentNode> nodes = nodeFinder.Find(query);
+            foreach (var node in nodes)
+            {
+                yield return PurgePage(node.Path);
+            }
+        }
+    }
+
+    public class EntryPublisher
+    {
+        private Zengenti.Contensis.Management.Project Project;
+
+        public EntryPublisher(string rootUrl, string clientId, string sharedSecret, string projectId)
+        {
+            var client = ManagementClient.Create(rootUrl, clientId, sharedSecret);
+            Project = client.Projects.Get(projectId);
+        }
+
+        public ScheduledEventResult PublishEntry(string id)
+        {
+            var guid = Guid.Parse(id);
+            Zengenti.Contensis.Management.Entry entry = Project.Entries.Get(guid);
+            var result = new ScheduledEventResult { Action = "Publish entry", Subject = entry.Slug };
+            if(entry.Workflow.AllowedEvents.Contains("draft.publish"))
+            {
+                entry.Workflow.Invoke("draft.publish");
+                result.Status = "OK";
+            }
+            else
+            {
+                var allowed = string.Join(", ", entry.Workflow.AllowedEvents);
+                result.Status = $"FAIL, ALLOWED: {allowed}";
+            }           
+            return result;
+        }
+
+        public IEnumerable<ScheduledEventResult> PublishEntries(IEnumerable<string> ids)
+        {
+            foreach (var id in ids)
+            {
+                yield return PublishEntry(id);
+            }
+        }
+    }
+
+    public struct ScheduledEventResult
+    {
+        public string Action;
+        public string Subject;
+        public string Status;
+    }
+
+}

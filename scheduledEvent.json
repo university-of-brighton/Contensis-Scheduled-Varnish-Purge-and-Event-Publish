@@ -1,0 +1,121 @@
+{
+	"version": {
+		"createdBy": "me",
+		"created": "2019-08-23T09:35:44.2520368Z",
+		"publishedBy": "me",
+		"published": "2019-08-23T09:41:17.8308634Z",
+		"versionNo": "1.0",
+		"workflowStatus": "Published"
+	},
+	"id": "scheduledEvent",
+	"projectId": "yourproject",
+	"name": {
+		"en-GB": "ScheduledEvent"
+	},
+	"description": {
+		"en-GB": "Schedules a publish or purge of content on the website (to be polled from elsewhere)"
+	},
+	"entryTitleField": "title",
+	"fields": [
+		{
+			"id": "title",
+			"name": {
+				"en-GB": "Title"
+			},
+			"dataType": "string",
+			"dataFormat": "",
+			"description": {
+				"en-GB": null
+			},
+			"default": null,
+			"validations": {}
+		},
+		{
+			"id": "when",
+			"name": {
+				"en-GB": "When"
+			},
+			"dataType": "dateTime",
+			"dataFormat": "",
+			"description": {
+				"en-GB": null
+			},
+			"default": null,
+			"validations": {
+				"required": {
+					"message": null
+				}
+			},
+			"editor": {
+				"id": "datetime",
+				"instructions": {
+					"en-GB": ""
+				},
+				"properties": null
+			}
+		},
+		{
+			"id": "eventType",
+			"name": {
+				"en-GB": "Event type"
+			},
+			"dataType": "string",
+			"dataFormat": "taxonomy",
+			"description": {
+				"en-GB": null
+			},
+			"default": null,
+			"validations": {
+				"taxonomyRoot": {
+					"key": "0/1332",
+					"message": null
+				},
+				"required": {
+					"message": null
+				}
+			},
+			"editor": {
+				"id": "taxonomytree",
+				"instructions": {
+					"en-GB": ""
+				},
+				"properties": {
+					"placeholderText": {
+						"en-GB": ""
+					}
+				}
+			}
+		},
+		{
+			"id": "parameters",
+			"name": {
+				"en-GB": "Parameters"
+			},
+			"dataType": "stringArray",
+			"dataFormat": "",
+			"description": {
+				"en-GB": null
+			},
+			"default": null,
+			"validations": {
+				"required": {
+					"message": null
+				}
+			},
+			"editor": {
+				"id": "text",
+				"instructions": {
+					"en-GB": "Either entry id's, folder paths or page paths"
+				},
+				"properties": null
+			}
+		}
+	],
+	"enabled": true,
+	"defaultLanguage": "en-GB",
+	"supportedLanguages": [
+		"en-GB"
+	],
+	"workflowId": "contensisEntryBasic",
+	"dataFormat": "entry"
+}
